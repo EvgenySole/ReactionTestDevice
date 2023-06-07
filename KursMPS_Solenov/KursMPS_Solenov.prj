@@ -1,0 +1,7 @@
+[ARCH]=00000000,KursMPS_Solenov.arh
+[SOURCE]=00000001,KursMPS_Solenov.asm
+[ROMSIZE]=4
+[FREQ]=1000000
+[FREEPINLEVEL]=1
+[WND.asm]=(222,71,1826,709)D:\Disc D\Локальный диск\UCHEBA\Demis 3.5\KursMPS_Solenov\KursMPS_Solenov.asm
+[WND.arh]=(459,125,2063,763)D:\Disc D\Локальный диск\UCHEBA\Demis 3.5\KursMPS_Solenov\KursMPS_Solenov.arh

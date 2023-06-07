@@ -1,0 +1,905 @@
+Microsoft (R) Macro Assembler Version 6.14.8444		    06/08/23 02:12:57
+KursMPS_Solenov.asm					     Page 1 - 1
+
+
+				.386
+ = 1000				RomSize    EQU   4096
+
+ = 00FE				DigOutPort = 0FEh            ; Порт вывода кода символа
+ = 00FD				IndSlctPort = 0FDh           ; Порт выбора семисегментного индикатора
+ = 00FB				ModeSlctPort = 0FBh          ; Порт вывода текущего режима
+
+ = 00FE				InButtonPort1 = 0FEh         ; Порт считывания клавиш 1
+ = 00FD				InButtonPort2 = 0FDh         ; Порт считывания клавиш 2
+
+ = 0003				SizeOfElemResMass = 3        ; Размер одного элемента массива результатов
+
+ = 0200				TimeStart = 200h             ; Время ожидания 1 секунды
+ = 0006				TimeMS = 06                  ; Время ожидания 1 миллисекунды
+
+ 0000				IntTable   SEGMENT use16 AT 0
+ 0000				IntTable   ENDS
+
+ 0000				Data       SEGMENT use16 AT 40h
+ 0000  000A [			           DigDS      db 10 dup(?)
+        00
+       ]
+ 000A  000A [			           TablDS     db 10 dup(?)
+        00
+       ]
+ 0014 0000			           ReactTime  dw ?
+ 0016 0000			           ReactTimeOld dw ?
+ 0018 0000			           RandomNum  dw ?
+ 001A  0003 [			           ReadyImageDS db 3 dup(?)
+        00
+       ]
+ 001D  0003 [			           ErrorImageDS db 3 dup(?)
+        00
+       ]
+ 0020  0003 [			           StartImageDS db 3 dup(?)
+        00
+       ]
+ 0023  0096 [			           ResMassDS    db 150 dup(?)
+        00
+       ]
+ 00B9  0096 [			           ResMassSortDS db 150 dup(?)
+        00
+       ]
+ 014F 00			           NumOfReact db ?
+ 0150 0000			           NumOfReact3 dw ?
+ 0152 0000			           NumOfRes   dw ?
+ 0154 0000			           Buttons    dw ?
+ 0156 0000			           ButtonsCheck dw ?
+ 0158 00			           InputNum   db ?
+ 0159 00			           NumOfMode  db ?
+ 015A 00			           InPort1Old db ?
+ 015B 00			           InPort2Old db ?
+ 015C 00			           NextByteFl db ?
+ 015D 00			           IsStartFl  db ?
+ 015E 00			           IsEndFl    db ?
+ 015F 00			           IsIncNumReact db ?
+ 0160 00			           RandGenFl db ?
+ 0161 00			           DelayEndFl db ?
+ 0162 00			           DelayMSEndFl db ?
+ 0163 0000			           TimeStartDS dw ?
+ 0165 00			           TimeMSDS   db ?
+ 0166 00			           IsRandomTime db ?
+ 0167 00			           IsStartTest db ?
+ 0168 00			           IsSortMass  db ?
+ 0169 0000			           SortVar    dw ?
+ 016B 00			           IsInitStart db ?
+ 016C 00			           ErrorFlag  db ?
+ 016D				Data       ENDS
+
+ 0000				Stk        SEGMENT use16 AT 2000h
+ 0000  0010 [			           dw    16 dup (?)
+        0000
+       ]
+ 0020				StkTop     Label Word
+ 0020				Stk        ENDS
+
+ 0000				InitData   SEGMENT use16
+ 0000				InitDataStart:
+ 0000				InitDataEnd:
+ 0000				InitData   ENDS
+
+ 0000				Code       SEGMENT use16
+				           ASSUME cs:Code,ds:Data,es:Data
+				           
+ 0000 60 7C 5D			           ReadyImage db 60h, 7Ch, 5Dh    ; Массив отображения готовности "Rdy"
+ 0003 73 60 60			           ErrorImage db 73h, 60h, 60h    ; Массив отображения ошибки "Err"
+ 0006 40 40 40			           StartImage db 40h, 40h, 40h    ; Массив отображения начала "---"
+				           
+				           ; Таблица преобразования
+ 0009 C0 F3 89 A1 B2 A4		           Tabl db 0C0h, 0F3h, 89h, 0A1h, 0B2h, 0A4h, 84h, 0F1h, 80h, 0A0h
+       84 F1 80 A0
+				           
+ 0013				Init       PROC  Near
+ 0013  8D 36 0009 R		           lea   si, Tabl                 ; Подготовка таблицы преобразования
+ 0017  8D 3E 000A R		           lea   di, TablDS               ; Пересылка в сегмент данных
+ 001B  B9 000A			           mov   cx, size TablDS         
+ 001E  2E: 8A 04		Init1:     mov   al, cs:[si]
+ 0021  F6 D0			           not   al
+ 0023  88 05			           mov   ds:[di], al
+ 0025  46			           inc   si
+ 0026  47			           inc   di
+ 0027  E2 F5			           loop  Init1
+				           
+ 0029  B8 0000			           mov   ax, 0                    ; Подготовка массива результатов
+ 002C  8D 3E 0023 R		           lea   di, ResMassDS            ; Обнуление всех байтов
+ 0030  B9 0096			           mov   cx, size ResMassDS
+ 0033  88 05			Init2:     mov   [di], al
+ 0035  47			           inc   di
+ 0036  E2 FB			           loop  Init2
+				           
+ 0038  B8 0000			           mov   ax, 0                    ; Подготовка отсортированного массива результатов
+ 003B  8D 3E 00B9 R		           lea   di, ResMassSortDS        ; Обнуление всех байтов
+ 003F  B9 0096			           mov   cx, size ResMassSortDS
+ 0042  88 05			Init3:     mov   [di], al
+ 0044  47			           inc   di
+ 0045  E2 FB			           loop  Init3
+				           
+ 0047  8D 36 0000 R		           lea   si, ReadyImage           ; Подготовка массива отображения готовности
+ 004B  8D 3E 001A R		           lea   di, ReadyImageDS         ; Пересылка в сегмент данных
+ 004F  B9 0003			           mov   cx, size ReadyImageDS
+ 0052  2E: 8A 04		Init4:     mov   al, cs:[si]
+ 0055  88 05			           mov   [di], al
+ 0057  46			           inc   si
+ 0058  47			           inc   di
+ 0059  E2 F7			           loop  Init4
+				           
+ 005B  8D 36 0003 R		           lea   si, ErrorImage           ; Подготовка массива отображения ошибки
+ 005F  8D 3E 001D R		           lea   di, ErrorImageDS         ; Пересылка в сегмент данных
+ 0063  B9 0003			           mov   cx, size ErrorImageDS
+ 0066  2E: 8A 04		Init5:     mov   al, cs:[si]
+ 0069  88 05			           mov   [di], al
+ 006B  46			           inc   si
+ 006C  47			           inc   di
+ 006D  E2 F7			           loop  Init5
+				           
+ 006F  8D 36 0006 R		           lea   si, StartImage           ; Подготовка массива отображения начала
+ 0073  8D 3E 0020 R		           lea   di, StartImageDS         ; Пересылка в сегмент данных
+ 0077  B9 0003			           mov   cx, size StartImageDS
+ 007A  2E: 8A 04		Init6:     mov   al, cs:[si]
+ 007D  88 05			           mov   [di], al
+ 007F  46			           inc   si
+ 0080  47			           inc   di
+ 0081  E2 F7			           loop  Init6
+				           
+ 0083  C6 06 015D R 00		           mov   IsStartFl, 0             ; Инициализация флага начала
+ 0088  C6 06 015E R 00		           mov   IsEndFl, 0               ; Инициализация флага окончания
+ 008D  C6 06 016C R 00		           mov   ErrorFlag, 0             ; Инициализация флага ошибки
+ 0092  C7 06 0014 R 0000	           mov   ReactTime, 0             ; Инициализация времени реакции
+ 0098  C7 06 0016 R 0000	           mov   ReactTimeOld, 0          ; Инициализация прошлого времени реакции
+ 009E  C6 06 0159 R 01		           mov   NumOfMode, 1             ; Инициализация номера режима
+ 00A3  C6 06 014F R 00		           mov   NumOfReact, 0            ; Инициализация номера испытания для отображения
+ 00A8  C7 06 0150 R 0000	           mov   NumOfReact3, 0           ; Инициализация номера испытания 
+ 00AE  C7 06 0152 R 0000	           mov   NumOfRes, 0              ; Инициализация номера результата
+ 00B4  C7 06 0154 R 0000	           mov   Buttons, 0               ; Инициализация образа передних фронтов клавиш
+ 00BA  C7 06 0156 R 0000	           mov   ButtonsCheck, 0          ; Инициализация образа зажатых клавиш
+ 00C0  C7 06 0163 R 0200	           mov   TimeStartDS, TimeStart   ; Инициализация времени ожидания 1 секунду
+ 00C6  C6 06 0165 R 06		           mov   TimeMSDS, TimeMS         ; Инициализация времени ожидания 1 миллисекунду
+				           
+ 00CB  C6 06 015A R 00		           mov   InPort1Old, 0
+ 00D0  C6 06 015B R 00		           mov   InPort2Old, 0
+ 00D5  C6 06 0161 R FF		           mov   DelayEndFl, 0FFh
+ 00DA  C6 06 0162 R FF		           mov   DelayMSEndFl, 0FFh
+ 00DF  C6 06 015C R 00		           mov   NextByteFl, 0
+ 00E4  C6 06 0167 R 00		           mov   IsStartTest, 0           ; Инициализация вспомогательных переменных
+ 00E9  C6 06 015F R 00		           mov   IsIncNumReact, 0
+ 00EE  C6 06 0168 R 00		           mov   IsSortMass, 0
+ 00F3  C6 06 016B R FF		           mov   IsInitStart, 0FFh
+ 00F8  C6 06 0166 R 00		           mov   IsRandomTime, 0
+ 00FD  C3			           RET
+ 00FE				Init       ENDP   
+
+
+ 00FE				DrebDelete1 PROC  NEAR
+ 00FE  8A E0			DrebReset1: mov   ah, al
+ 0100  B9 0032			           mov   cx, 50
+ 0103  E4 FE			DrebLoop1:  in    al, InButtonPort1       ; Удаление дребезга для 1 порта клавиш 
+ 0105  F6 D0			           not   al                    
+ 0107  38 E0			           cmp   al, ah                   
+ 0109  75 F3			           jnz   DrebReset1
+ 010B  E2 F6			           loop  DrebLoop1
+ 010D  8A C4			           mov   al, ah
+ 010F  C3			           RET
+ 0110				DrebDelete1 ENDP  
+
+
+ 0110				DrebDelete2 PROC  NEAR
+ 0110  8A E0			DrebReset2: mov   ah, al
+ 0112  B9 0032			           mov   cx, 50
+ 0115  E4 FD			DrebLoop2:  in    al, InButtonPort2       ; Удаление дребезга для 2 порта клавиш 
+ 0117  F6 D0			           not   al                    
+ 0119  38 E0			           cmp   al, ah                   
+ 011B  75 F3			           jnz   DrebReset2
+ 011D  E2 F6			           loop  DrebLoop2
+ 011F  8A C4			           mov   al, ah
+ 0121  C3			           RET
+ 0122				DrebDelete2 ENDP  
+
+
+ 0122				ReadButtons   PROC  NEAR
+ 0122  E4 FE			           in    al, InButtonPort1
+ 0124  F6 D0			           not   al
+ 0126  E8 FFD5			           call  DrebDelete1              ; Удаление дребезга младшего байта
+ 0129  A2 0156 R		           mov   byte ptr ButtonsCheck, al
+				                                          ; Сохранение младшего байта для проверки на ошибку
+ 012C  8A D8			           mov   bl, al
+ 012E  32 1E 015A R		           xor   bl, InPort1Old           ; Выделение переднего фронта младшего байта
+ 0132  A2 015A R		           mov   InPort1Old, al         
+ 0135  22 C3			           and   al, bl
+ 0137  8A D0			           mov   dl, al
+ 0139  E4 FD			           in    al, InButtonPort2
+ 013B  F6 D0			           not   al
+ 013D  E8 FFD0			           call  DrebDelete2              ; Удаление дребезга старшего байта
+ 0140  A2 0157 R		           mov   byte ptr ButtonsCheck+1, al
+				                                          ; Сохранение старшего байта для проверки на ошибку
+ 0143  8A D8			           mov   bl, al
+ 0145  32 1E 015B R		           xor   bl, InPort2Old           ; Выделение переднего фронта старшего байта
+ 0149  A2 015B R		           mov   InPort2Old, al         
+ 014C  22 C3			           and   al, bl
+ 014E  8A F0			           mov   dh, al
+ 0150  89 16 0154 R		           mov   Buttons, dx              ; Сохранение образа фронтов клавиш
+
+ 0154				ReadButtonsEnd:           
+ 0154  C3			           RET
+ 0155				ReadButtons   ENDP
+
+
+ 0155				ErrorCheck PROC NEAR
+ 0155  C6 06 016C R 00		           mov   ErrorFlag, 0
+ 015A  B3 00			           mov   bl, 0
+ 015C  8B 16 0156 R		           mov   dx, ButtonsCheck         ; Загрузка образа нажатых клавиш
+ 0160				CheckLoop: 
+ 0160  F7 C2 FFFF		           test  dx, 0FFFFh               ; Проверка на флаг знака
+ 0164  78 02			           js    ReadError                ; Если флаг знака активен, то инкремент накопителя
+ 0166  EB 02			           jmp   NextBit
+ 0168				ReadError: 
+ 0168  FE C3			           inc   bl
+ 016A  D1 E2			NextBit:   shl   dx, 1                    ; Сдвиг влево для появления бита в разряде знака
+ 016C  75 F2			           jnz   CheckLoop    
+ 016E  80 FB 01			           cmp   bl, 1                    ; Если нажато больше 1 клавиши, то взводится флаг ошибки 
+ 0171  76 05			           jbe   ErrorCheckEnd
+ 0173  C6 06 016C R FF		           mov   ErrorFlag, 0FFh
+
+ 0178				ErrorCheckEnd:
+ 0178  C3			           RET
+ 0179				ErrorCheck ENDP   
+
+
+ 0179				StartControl  PROC  NEAR
+ 0179  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh          ; Если ошибка, то выход
+ 017E  74 68			           jz    StartControlEnd
+ 0180  81 3E 0154 R 1000	           cmp   Buttons, 1000h           ; Проверка на бит клавиши Старт
+ 0186  75 60			           jnz   StartControlEnd 
+ 0188  80 3E 016B R FF		SC1:       cmp   IsInitStart, 0FFh
+ 018D  74 1F			           jz    SC3 
+ 018F  80 3E 015F R FF		SC2:       cmp   IsIncNumReact, 0FFh      ; Если испытание завершилось, 
+ 0194  75 24			           jnz   SC4                      ; то инкрементировать номер испытания
+ 0196  A0 014F R		           mov   al, NumOfReact              
+ 0199  04 01			           add   al, 1                    ; Инкремент номера испытания
+ 019B  27			           daa
+ 019C  A2 014F R		           mov   NumOfReact, al
+ 019F  83 06 0150 R 03		           add   NumOfReact3, SizeOfElemResMass
+ 01A4  C6 06 015F R 00		           mov   IsIncNumReact, 0
+ 01A9  C6 06 0166 R FF		           mov   IsRandomTime, 0FFh       ; Разрешение на генерацию случайного времени
+ 01AE  A1 0014 R		SC3:       mov   ax, ReactTime            ; Сохранение прошлого времени реакции
+ 01B1  A3 0016 R		           mov   ReactTimeOld, ax
+ 01B4  C7 06 0014 R 0000	           mov   ReactTime, 0             ; Обнуление текущего времени реакции
+ 01BA  F6 16 015D R		SC4:       not   IsStartFl                ; Инвертирование флага начала
+ 01BE  C6 06 0160 R FF		           mov   RandGenFl, 0FFh          ; Разрешение на генерацию случайного числа
+ 01C3  C6 06 015E R 00		           mov   IsEndFl, 0               ; Сброс флага окончания испытания
+ 01C8  C6 06 0167 R FF		           mov   IsStartTest, 0FFh        ; Взвод флага начала измерения реакции
+ 01CD  C6 06 0161 R 00		           mov   DelayEndFl, 0            ; Сброс флага окончания задержки перед испытанием
+ 01D2  C6 06 016B R 00		           mov   IsInitStart, 0           ; Сброс флага первого испытания
+ 01D7  80 3E 015D R 00		           cmp   IsStartFl, 0             ; Если флаг начала испытания неактивен, то
+ 01DC  75 0A			           jnz   StartControlEnd
+ 01DE  C6 06 015E R FF		           mov   IsEndFl, 0FFh            ; Взвод флага окончания испытания
+ 01E3  C6 06 0161 R FF		           mov   DelayEndFl, 0FFh         ; Взвод флага окончания задержки
+ 01E8				StartControlEnd:
+ 01E8  C3			           RET
+ 01E9				StartControl  ENDP
+
+
+ 01E9				ModeControl   PROC  NEAR
+ 01E9  80 3E 015D R FF		           cmp   IsStartFl, 0FFh            ; Если идет испытание или ошибка, то выход
+ 01EE  74 1F			           jz    ModeControlEnd
+ 01F0  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh
+ 01F5  74 18			           jz    ModeControlEnd
+ 01F7  81 3E 0154 R 2000	           cmp   Buttons, 2000h             ; Проверка на бит клавиши Режим
+ 01FD  75 10			           jnz   ModeControlEnd
+ 01FF  D0 26 0159 R		           shl   NumOfMode, 1               ; Сдвиг влево
+ 0203  80 3E 0159 R 04		           cmp   NumOfMode, 4               
+ 0208  76 05			           jbe   ModeControlEnd
+ 020A  C6 06 0159 R 01		           mov   NumOfMode, 1               ; Если сдвиг был 3 раза, то сброс на значение 1
+ 020F				ModeControlEnd:
+ 020F  C3			           RET
+ 0210				ModeControl   ENDP
+
+
+ 0210				ResultsControl PROC  NEAR
+ 0210  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh            ; Если идет испытание или ошибка, то выход
+ 0215  74 37			           jz    ResultsControlEnd
+ 0217  81 3E 0154 R 4000	           cmp   Buttons, 4000h             ; Проверка на бит клавиши Вверх
+ 021D  75 12			           jnz   DownButton         
+ 021F  A1 0152 R		           mov   ax, NumOfRes
+ 0222  83 C0 03			           add   ax, SizeOfElemResMass      ; Добавление к адресу результата 3 пока
+ 0225  3B 06 0150 R		           cmp   ax, NumOfReact3            ; не будет равно или больше количества испытаний
+ 0229  72 03			           jb    RC1
+ 022B  B8 0000			           mov   ax, 0                      ; Иначе обнуление
+ 022E  A3 0152 R		RC1:       mov   NumOfRes, ax  
+ 0231				DownButton:
+ 0231  81 3E 0154 R 8000	           cmp   Buttons, 8000h             ; Проверка на бит клавиши Вверх
+ 0237  75 15			           jnz   ResultsControlEnd  
+ 0239  A1 0152 R		           mov   ax, NumOfRes
+ 023C  83 E8 03			           sub   ax, SizeOfElemResMass      ; Вычитание из адреса результата 3 пока
+ 023F  3B 06 0150 R		           cmp   ax, NumOfReact3            ; не будет равно или больше количества испытаний
+ 0243  72 06			           jb    RC2
+ 0245  A1 0150 R		           mov   ax, NumOfReact3; 297       ; Иначе присвоение адреса последнего элемента
+ 0248  83 E8 03			           sub   ax, 3                      ; Перемещение на начало последнего элемента
+ 024B  A3 0152 R		RC2:       mov   NumOfRes, ax
+ 024E				ResultsControlEnd:  
+ 024E  C3			           RET
+ 024F				ResultsControl ENDP
+
+
+ 024F				DelayMS   PROC  NEAR                        ; Задержка 1 миллисекунда
+ 024F  80 2E 0165 R 01		           sub   TimeMSDS, 1                ; Вычитание из переменной времени
+ 0254  C6 06 0162 R 00		           mov   DelayMSEndFl, 0
+ 0259  80 3E 0165 R 00		           cmp   TimeMSDS, 0                ; Выход если не равно нулю
+ 025E  75 0A			           jnz   DelayMSEndM
+ 0260  C6 06 0162 R FF		           mov   DelayMSEndFl, 0FFh         ; Иначе взвод флага окончания задержки
+ 0265  C6 06 0165 R 06		           mov   TimeMSDS, TimeMS           ; Восстановление переменной миллисекунды
+ 026A				DelayMSEndM: 
+ 026A  C3			           RET
+ 026B				DelayMS   ENDP
+
+
+ 026B				InitRandom PROC NEAR
+ 026B  80 3E 016B R 00		           cmp   IsInitStart, 0             ; Если первое испытание прошло, то выход
+ 0270  74 2E			           jz    EndInitRandom
+ 0272  E8 FFDA			           call  DelayMS                    ; Задержка 1 миллисекунда
+ 0275  80 3E 0162 R 00		           cmp   DelayMSEndFl, 0
+ 027A  74 24			           jz    EndInitRandom
+ 027C  C6 06 0162 R FF		           mov   DelayMSEndFl, 0FFh         ; Если задержка окончена, 
+ 0281  8D 36 0014 R		           lea   si, ReactTime              ; то подотовка к генерации случайного числа и времени
+ 0285  8A 04			           mov   al, [si]
+ 0287  04 01			           add   al, 1                      ; Инкремент переменной случайного времени
+ 0289  27			           daa
+ 028A  88 04			           mov   [si], al
+ 028C  8A 44 01			           mov   al, [si+1]                 ; Добавление переноса и десятичная коррекция
+ 028F  14 00			           adc   al, 0
+ 0291  27			           daa
+ 0292  88 44 01			           mov   [si+1], al
+ 0295  A1 0014 R		           mov   ax, ReactTime
+ 0298  A3 0016 R		           mov   ReactTimeOld, ax           ; Сохранение в прошлое время реакции
+ 029B  C6 06 0160 R FF		           mov   RandGenFl, 0FFh            ; Разрешение на генерацию случайного числа и времени 
+ 02A0				EndInitRandom:
+ 02A0  C3			           RET
+ 02A1				InitRandom ENDP
+
+
+ 02A1				GenerateRand PROC NEAR
+ 02A1  80 3E 0160 R FF		           cmp   RandGenFl, 0FFh            ; Если не разрешена генерация, то выход
+ 02A6  75 44			           jnz   GenRandEnd
+ 02A8  A1 0016 R		           mov   ax, ReactTimeOld           ; Загрузка прошлого времени реакции
+ 02AB  B4 00			           mov   ah, 0
+ 02AD  B7 02			           mov   bh, 2
+ 02AF  F6 E7			           mul   bh                         ; Умножение на 2 прошлого времени реакции
+ 02B1  8B D8			           mov   bx, ax
+ 02B3  A1 0016 R		           mov   ax, ReactTimeOld           ; Загрузка прошлого времени реакции
+ 02B6  B4 00			           mov   ah, 0
+ 02B8  80 3E 0166 R 00		           cmp   IsRandomTime, 0            ; Если разрешена генерация случайного времени, 
+ 02BD  74 09			           jz    GenRand1
+ 02BF  01 06 0163 R		           add   TimeStartDS, ax            ; то добавление умноженного на 2 прошлого времени реакции
+ 02C3  C6 06 0166 R 00		           mov   IsRandomTime, 0
+ 02C8  B3 0C			GenRand1:  mov   bl, 12
+ 02CA  F6 F3			           div   bl                         ; Деление младшего байта прошлого времени на 12
+ 02CC  2C 00			           sub   al, 0  
+ 02CE  27			           daa                              ; Десятичная коррекция
+ 02CF  B4 00			           mov   ah, 0
+ 02D1  3C 12			           cmp   al, 12h
+ 02D3  76 07			           jbe   GenRand2                   ; Если больше 12, то дополнительное деление на 2
+ 02D5  B3 02			           mov   bl, 2
+ 02D7  F6 F3			           div   bl
+ 02D9  2C 00			           sub   al, 0                      
+ 02DB  27			           daa                              ; Десятичная коррекция
+ 02DC				GenRand2:                        
+ 02DC  83 F8 00			           cmp   ax, 0
+ 02DF  75 03			           jnz   GenRand3                   ; Если равно 0, то присвоение 3
+ 02E1  B8 0003			           mov   ax, 3
+ 02E4  A3 0018 R		GenRand3:  mov   RandomNum, ax
+ 02E7  C6 06 0160 R 00		           mov   RandGenFl, 0               ; Запрет на генерацию случайного числа       
+ 02EC				GenRandEnd:           
+ 02EC  C3			           RET
+ 02ED				GenerateRand ENDP
+
+
+ 02ED				ReadNumbers PROC NEAR
+ 02ED  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh            ; Если ошибка, то выход
+ 02F2  74 3F			           jz    ReadNumbersEnd
+ 02F4  80 3E 0167 R 00		           cmp   IsStartTest, 0             ; Если счетчик реакции не разрешен, то выход
+ 02F9  74 38			           jz    ReadNumbersEnd
+ 02FB  80 3E 015E R FF		           cmp   IsEndFl, 0FFh              ; Если испытание окончено, то выход
+ 0300  74 31			           jz    ReadNumbersEnd
+ 0302  8B 16 0154 R		           mov   dx, Buttons
+ 0306  81 E2 0FFF		           and   dx, 0FFFh                  ; Применение маски для устранения
+ 030A  B8 0000			           mov   ax, 0                      ; от тетрады управляющих клавиш
+ 030D  83 FA 00			           cmp   dx, 0
+ 0310  74 21			           jz    ReadNumbersEnd             ; Если не нажата ни одна клавиша, то выход     
+ 0312  D1 EA			ReadNum:   shr   dx, 1
+ 0314  04 01			           add   al, 1
+ 0316  27			           daa                              ; Преобразование в позиционный код
+ 0317  83 FA 00			           cmp   dx, 0
+ 031A  74 02			           jz    ReadNumEnd
+ 031C  E2 F4			           loop  ReadNum   
+ 031E				ReadNumEnd:
+ 031E  3B 06 0018 R		           cmp   ax, RandomNum
+ 0322  75 0F			           jnz   ReadNumbersEnd             ; Если нажата правильная клавиша,
+ 0324  C6 06 015E R FF		           mov   IsEndFl, 0FFh              ; то взвод флага окончания испытания
+ 0329  C6 06 0167 R 00		           mov   IsStartTest, 0             ; и разрешение на инкремент номера испытания
+ 032E  C6 06 015F R FF		           mov   IsIncNumReact, 0FFh
+ 0333				ReadNumbersEnd:
+ 0333  C3			           RET
+ 0334				ReadNumbers ENDP
+
+
+ 0334				ReactTest  PROC  NEAR
+ 0334  80 3E 0167 R 00		           cmp   IsStartTest, 0             ; Если счетчик реакции не разрешен, то выход
+ 0339  74 41			           jz    ReactTestEnd
+ 033B  80 3E 015E R FF		           cmp   IsEndFl, 0FFh              ; Если испытание окончено, то выход
+ 0340  74 3A			           jz    ReactTestEnd
+ 0342  80 3E 0161 R 00		           cmp   DelayEndFl, 0              ; Если задержка не окончена, то выход
+ 0347  74 33			           jz    ReactTestEnd
+ 0349  81 3E 0014 R 9990	           cmp   ReactTime, 9990h           ; Фиксирование максимального значения реакции на 9999h
+ 034F  72 08			           jb    ReactTestInc
+ 0351  C7 06 0014 R 9999	           mov   ReactTime, 9999h
+ 0357  EB 23			           jmp   ReactTestEnd   
+ 0359				ReactTestInc:
+ 0359  E8 FEF3			           call  DelayMS                    ; Задержка 1 миллисекунда
+ 035C  80 3E 0162 R 00		           cmp   DelayMSEndFl, 0            ; Если задержка не окончена, то выход
+ 0361  74 19			           jz    ReactTestEnd
+ 0363  C6 06 0162 R FF		           mov   DelayMSEndFl, 0FFh         ; Взвод флага окончания задержки
+ 0368  8D 36 0014 R		           lea   si, ReactTime
+ 036C  8A 04			           mov   al, [si]
+ 036E  04 09			           add   al, 9; 76
+ 0370  27			           daa                              ; Добавление к текущему времени реакции и корректировка
+ 0371  88 04			           mov   [si], al
+ 0373  8A 44 01			           mov   al, [si+1]
+ 0376  14 00			           adc   al, 0
+ 0378  27			           daa
+ 0379  88 44 01			           mov   [si+1], al
+ 037C				ReactTestEnd: 
+ 037C  C3			           RET
+ 037D				ReactTest  ENDP
+
+
+ 037D				WriteCurRes PROC NEAR
+ 037D  80 3E 015F R FF		           cmp   IsIncNumReact, 0FFh        ; Если не разрешен инкремент номера реакции, то выход
+ 0382  75 24			           jnz   WCREnd
+ 0384  8D 3E 0023 R		           lea   di, ResMassDS
+ 0388  8D 36 0014 R		           lea   si, ReactTime
+ 038C  B4 00			           mov   ah, 0
+ 038E  A1 0150 R		           mov   ax, NumOfReact3
+ 0391  8B D8			           mov   bx, ax
+ 0393  A0 014F R		           mov   al, NumOfReact
+ 0396  88 01			           mov   [di+bx], al                ; Загрузка в первый байт элемента номера реакции
+ 0398  43			           inc   bx
+ 0399  8A 44 01			           mov   al, [si+1]
+ 039C  88 01			           mov   [di+bx], al                ; Загрузка во второй байт элемента старшего байта времени реакции
+ 039E  43			           inc   bx
+ 039F  8A 04			           mov   al, [si]
+ 03A1  88 01			           mov   [di+bx], al                ; Загрузка в третий байт элемента младшего байта времени реакции
+ 03A3  C6 06 0168 R FF		           mov   IsSortMass, 0FFh           ; Взвод флага разрешения копирования и сортировки массива
+ 03A8				WCREnd:           
+ 03A8  C3			           RET
+ 03A9				WriteCurRes ENDP
+
+
+ 03A9				CopySortMass PROC NEAR
+ 03A9  80 3E 0168 R 00		           cmp   IsSortMass, 0               ; Если флаг разрешения сортировки не активен, то выход
+ 03AE  74 74			           jz    CopySortEnd
+				           
+ 03B0  8D 36 0023 R		           lea   si, ResMassDS
+ 03B4  8D 3E 00B9 R		           lea   di, ResMassSortDS
+ 03B8  B5 00			           mov   ch, 0
+ 03BA  8B 0E 0150 R		           mov   cx, NumOfReact3
+ 03BE  41			           inc   cx
+				           
+ 03BF  8A 04			CopySort1: mov   al, [si]
+ 03C1  88 05			           mov   [di], al                   ; Копирование массива в сортированный массив
+ 03C3  46			           inc   si
+ 03C4  47			           inc   di
+ 03C5  E2 F8			           loop  CopySort1
+ 03C7  80 3E 014F R 02		           cmp   NumOfReact, 2
+ 03CC  72 56			           jb    CopySortEnd
+ 03CE  A1 0150 R		           mov   ax, NumOfReact3
+ 03D1  B3 03			           mov   bl, SizeOfElemResMass 
+ 03D3  F6 F3			           div   bl  
+ 03D5  8A C8			           mov   cl, al
+ 03D7  49			           dec   cx
+ 03D8  BB 0000			           mov   bx, 0
+ 03DB				Sorting:                                    ; Сортировка массива методом "Пузырек"
+ 03DB  51			           push  cx
+ 03DC  8D 36 00B9 R		           lea   si, ResMassSortDS
+ 03E0				Change:
+ 03E0  8A 44 02			           mov   al, [si+2]
+ 03E3  8A 64 01			           mov   ah, [si+1]
+ 03E6  8A 54 05			           mov   dl, [si+5]
+ 03E9  8A 74 04			           mov   dh, [si+4]
+ 03EC  3B C2			           cmp   ax, dx
+ 03EE  76 2C			           jbe   NoChange   
+ 03F0  8A 5C 02			           mov   bl, [si+2]
+ 03F3  8A 7C 01			           mov   bh, [si+1]
+ 03F6  89 1E 0169 R		           mov   SortVar, bx  
+ 03FA  8A 5C 05			           mov   bl, [si+5]
+ 03FD  8A 7C 04			           mov   bh, [si+4]
+ 0400  88 5C 02			           mov   [si+2], bl
+ 0403  88 7C 01			           mov   [si+1], bh 
+ 0406  8B 1E 0169 R		           mov   bx, SortVar 
+ 040A  88 5C 05			           mov   [si+5], bl
+ 040D  88 7C 04			           mov   [si+4], bh 
+ 0410  8A 1C			           mov   bl, [si]
+ 0412  8A C3			           mov   al, bl
+ 0414  8A 5C 03			           mov   bl, [si+3]
+ 0417  88 1C			           mov   [si], bl
+ 0419  88 44 03			           mov   [si+3], al                 
+ 041C				NoChange:
+ 041C  83 C6 03			           add   si, 3
+ 041F  E2 BF			           loop  Change
+ 0421  59			           pop   cx
+ 0422  E2 B7			           loop  Sorting                    ; Окончание сортировки массива  
+ 0424				CopySortEnd:
+ 0424  C3			           RET
+ 0425				CopySortMass ENDP
+
+				           
+ 0425				DispMode   PROC  NEAR
+ 0425  A0 0159 R		           mov   al, NumOfMode              ; Вывод унитарного кода на индикаторы режимов
+ 0428  E6 FB			           out   ModeSlctPort, al    
+ 042A  C3			           RET
+ 042B				DispMode   ENDP
+
+
+ 042B				DispMassResults PROC NEAR  
+ 042B  80 3E 0159 R 01		           cmp   NumOfMode, 1               ; Если режим Испытание, то выход
+ 0430  74 7D			           jz    DNOREnd
+ 0432  B4 20			           mov   ah, 20h                    ; Начальный индикатор выбираем 6
+ 0434  B7 00			           mov   bh, 0
+ 0436  B9 0006			           mov   cx, 6                      ; Счетчик цикла на количество индикаторов
+
+ 0439  8D 36 001D R		           lea   si, ErrorImageDS           ; Загрузка массива индикации ошибки
+ 043D  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh            ; Если ошибка, то переход к выводу массива ошибки
+ 0442  74 4A			           jz    Error1
+				           
+ 0444  8B 3E 0152 R		           mov   di, NumOfRes               ; Загрузка смещения адреса выбранного результата
+ 0448  8D 36 00B9 R		           lea   si, ResMassSortDS
+ 044C  80 3E 0159 R 04		           cmp   NumOfMode, 4               ; Если режим = 4, загрузка сортированного массива
+ 0451  74 04			           jz    SortedMass                 ; Если режим = 2, загрузка обычного массива
+ 0453  8D 36 0023 R		           lea   si, ResMassDS
+ 0457				SortedMass:
+ 0457  C6 06 015C R 00		           mov   NextByteFl, 0              
+ 045C  8A C4			DNOR1:     mov   al, ah
+ 045E  F6 D0			           not   al
+ 0460  E6 FD			           out   IndSlctPort, al
+ 0462  8B DF			           mov   bx, di
+ 0464  8A 00			           mov   al, [si+bx]                ; Загрузка очередного байта
+ 0466  80 3E 015C R 00		           cmp   NextByteFl, 0
+ 046B  74 05			           jz    DNOR2
+ 046D  47			           inc   di                         ; Модификация адреса
+ 046E  24 0F			           and   al, 0Fh                    ; Выделение младшей тетрады  
+ 0470  EB 03			           jmp   DNOR3
+ 0472  C0 E8 04			DNOR2:     shr   al, 4                      ; Выделение старшей тетрады
+ 0475  8D 1E 000A R		DNOR3:     lea   bx, TablDS                 ; Загрузка таблицы преобразований
+ 0479  D7			           xlat                             ; Преобразование цифры в код
+ 047A  E6 FE			           out   DigOutPort, al             ; Вывод кода цифры
+ 047C  B0 FF			           mov   al, 0FFh
+ 047E  E6 FD			           out   IndSlctPort, al            ; Выключение индикатора
+ 0480  F6 D0			           not   al
+ 0482  E6 FE			           out   DigOutPort, al    
+ 0484  D0 EC			           shr   ah, 1                      ; Сдвиг на следующий индикатор
+ 0486  F6 16 015C R		           not   NextByteFl                 ; Инвертирование флага выбора тетрады
+ 048A  E2 D0			           loop  DNOR1
+ 048C  EB 21			           jmp   DNOREnd
+ 048E  8A C4			Error1:    mov   al, ah                     ; Вывод индикации об ошибке
+ 0490  F6 D0			           not   al                         ; на индикаторы 4, 3, 2
+ 0492  E6 FD			           out   IndSlctPort, al
+ 0494  83 F9 04			           cmp   cx, 4
+ 0497  77 0D			           ja    NextDig
+ 0499  8A 04			           mov   al, [si]   
+ 049B  46			           inc   si                 
+ 049C  E6 FE			           out   DigOutPort, al
+ 049E  B0 FF			           mov   al, 0FFh
+ 04A0  E6 FD			           out   IndSlctPort, al
+ 04A2  F6 D0			           not   al
+ 04A4  E6 FE			           out   DigOutPort, al    
+ 04A6  D0 EC			NextDig:   shr   ah, 1   
+ 04A8  83 F9 02			           cmp   cx, 2
+ 04AB  74 02			           jz    DNOREnd
+ 04AD  E2 DF			           loop  Error1
+ 04AF				DNOREnd:   
+ 04AF  C3			           RET  
+ 04B0				DispMassResults ENDP
+				        
+				        
+ 04B0				DelaySec   PROC  NEAR
+ 04B0  80 3E 0161 R FF		           cmp   DelayEndFl, 0FFh           ; Если задержка уже прошла, то выход
+ 04B5  74 1C			           jz    DelayEndM
+ 04B7  83 2E 0163 R 01		           sub   TimeStartDS, 1             ; Декремент из времени ожидания секунды
+ 04BC  C6 06 0161 R 00		           mov   DelayEndFl, 0
+ 04C1  75 10			           jnz   DelayEndM                  ; Если не равно нулю, то выход
+ 04C3  C6 06 0161 R FF		           mov   DelayEndFl, 0FFh           ; Взвод флагов окончания и начала счетчика реакции
+ 04C8  C6 06 0167 R FF		           mov   IsStartTest, 0FFh
+ 04CD  C7 06 0163 R 0200	           mov   TimeStartDS, TimeStart     ; Восстановление времени ожидания секунды
+ 04D3				DelayEndM: 
+ 04D3  C3			           RET
+ 04D4				DelaySec   ENDP   
+				           
+
+ 04D4				DispReactTest PROC  NEAR
+ 04D4  80 3E 0159 R 01		           cmp   NumOfMode, 1
+ 04D9  0F 85 00D2		           jnz   DRTEnd
+ 04DD  E8 FFD0			           call  DelaySec                   ; Задержка 1 секунда перед выводом случайного числа          
+ 04E0  B4 20			           mov   ah, 20h                    ; Начальный индикатор выбираем 6
+ 04E2  B0 00			           mov   al, 0
+ 04E4  B7 00			           mov   bh, 0
+ 04E6  8A 16 014F R		           mov   dl, NumOfReact             ; Загрузка отображения номера реакции
+ 04EA  02 C2			           add   al, dl
+ 04EC  27			           daa
+ 04ED  8A D0			           mov   dl, al
+ 04EF  C6 06 015C R 00		           mov   NextByteFl, 0
+ 04F4  B9 0006			           mov   cx, 6                      ; Счетчик цикла на количество индикаторов
+ 04F7  8D 36 0020 R		           lea   si, StartImageDS           ; Загрузка массива отображения начала испытания
+ 04FB  80 3E 0161 R 00		           cmp   DelayEndFl, 0              ; Если задержка не заончилась, то переход к выводу
+ 0500  74 16			           jz    DRT1
+ 0502  8D 36 001D R		           lea   si, ErrorImageDS           ; Загрузка массива отображения ошибки
+ 0506  80 3E 016C R FF		           cmp   ErrorFlag, 0FFh            ; Если ошибка есть, то то переход к выводу
+ 050B  74 0B			           jz    DRT1
+ 050D  80 3E 015D R FF		           cmp   IsStartFl, 0FFh            ; Если испытание началось, то переход к выводу случайного
+ 0512  74 50			           jz    DispRandDig   
+ 0514  8D 36 001A R		           lea   si, ReadyImageDS           ; Загрузка массива отображения готовности
+ 0518  8A C4			DRT1:      mov   al, ah
+ 051A  F6 D0			           not   al
+ 051C  E6 FD			           out   IndSlctPort, al            ; Выбор индикатора
+ 051E  80 3E 016C R 00		           cmp   ErrorFlag, 0
+ 0523  74 05			           jz    NumReactM1                 ; Если ошибки нет, то вывод номера реакции
+ 0525  83 F9 04			           cmp   cx, 4
+ 0528  77 2B			           ja    NextDig1
+ 052A				NumReactM1:
+ 052A  83 F9 05			           cmp   cx, 5
+ 052D  72 12			           jb    ReadyIm
+ 052F  8A C2			           mov   al, dl 
+ 0531  80 3E 015C R 00		           cmp   NextByteFl, 0              ; Проверка выбора тетрады
+ 0536  74 04			           jz    DRT2
+ 0538  24 0F			           and   al, 0Fh                    ; Выделение младшей тетрады
+ 053A  EB 0A			           jmp   NumReactM    
+ 053C  C0 E8 04			DRT2:      shr   al, 4                      ; Выделение старшей тетрады
+ 053F  EB 05			           jmp   NumReactM      
+ 0541  8A 04			ReadyIm:   mov   al, [si]
+ 0543  46			           inc   si
+ 0544  EB 05			           jmp   ReadyIm2                   ; Вывод массива отображения начала, готовности или ошибки    
+ 0546  8D 1E 000A R		NumReactM: lea   bx, TablDS                 ; Загрузка таблицы преобразования
+ 054A  D7			           xlat                             ; Преобразование цифр в коды
+ 054B  E6 FE			ReadyIm2:  out   DigOutPort, al             ; Вывод кода символа
+ 054D  B0 FF			           mov   al, 0FFh
+ 054F  E6 FD			           out   IndSlctPort, al            ; Выключение индикатора
+ 0551  F6 D0			           not   al
+ 0553  E6 FE			           out   DigOutPort, al    
+ 0555  D0 EC			NextDig1:  shr   ah, 1                      ; Сдвиг бита на следующий нидикатор
+ 0557  F6 16 015C R		           not   NextByteFl                 ; Инвертирвание выбора выделения тетрады
+ 055B  83 F9 02			           cmp   cx, 2
+ 055E  74 4F			           jz    DRTEnd
+ 0560  E2 B6			           loop  DRT1
+ 0562  EB 4B			           jmp   DRTEnd        
+ 0564				DispRandDig:     
+ 0564  8D 36 0019 R		           lea   si, RandomNum+1            ; Загрузка случайного числа
+ 0568  80 3E 015E R 00		           cmp   IsEndFl, 0          
+ 056D  74 04			           jz    DRT4                
+ 056F  8D 36 0015 R		           lea   si, ReactTime+1            ; Если испытание закончилось, то загрузка времени реакции              
+ 0573  8A C4			DRT4:      mov   al, ah
+ 0575  F6 D0			           not   al
+ 0577  E6 FD			           out   IndSlctPort, al            ; Выбор индикатора
+ 0579  83 F9 04			           cmp   cx, 4
+ 057C  77 0A			           ja    DRT5
+ 057E				RandomNum1: 
+ 057E  8A 14			           mov   dl, [si]                   ; Загрузка байта случайного числа или времени реакции
+ 0580  80 3E 015C R 00		           cmp   NextByteFl, 0
+ 0585  74 01			           jz    DRT5
+ 0587  4E			           dec   si                         ; Модификация адреса
+ 0588  8A C2			DRT5:      mov   al, dl                     ; Загрузка номера испытания, а потом случайного или реакции
+ 058A  80 3E 015C R 00		           cmp   NextByteFl, 0
+ 058F  74 04			           jz    DRT6
+ 0591  24 0F			           and   al, 0Fh                    ; Выделение младшей тетрады
+ 0593  EB 03			           jmp   DRT7 
+ 0595  C0 E8 04			DRT6:      shr   al, 4                      ; Выделение старшей тетрады               
+ 0598  8D 1E 000A R		DRT7:      lea   bx, TablDS                 ; Загрузка таблицы преобразования
+ 059C  D7			           xlat                             ; Преобразование цифр в коды
+ 059D  E6 FE			           out   DigOutPort, al             ; Вывод кода символа
+ 059F  B0 FF			           mov   al, 0FFh
+ 05A1  E6 FD			           out   IndSlctPort, al            ; Выключение индикатора
+ 05A3  F6 D0			           not   al
+ 05A5  E6 FE			           out   DigOutPort, al    
+ 05A7  D0 EC			           shr   ah, 1                      ; Сдвиг бита на следующий нидикатор
+ 05A9  F6 16 015C R		           not   NextByteFl                 ; Инвертирвание выбора выделения тетрады
+ 05AD  E2 C4			           loop  DRT4     
+ 05AF				DRTEnd:    
+ 05AF  C3			           RET
+ 05B0				DispReactTest ENDP 
+				    
+				           
+ 05B0				Start:
+ 05B0  B8 ---- R		           mov   ax, Data                   ; Системная подготовка
+ 05B3  8E D8			           mov   ds, ax
+ 05B5  8E C0			           mov   es, ax
+ 05B7  B8 ---- R		           mov   ax, Stk
+ 05BA  8E D0			           mov   ss, ax
+ 05BC  8D 26 0020 R		           lea   sp, StkTop
+ 05C0  E8 FA50			           call  Init                       ; Функциональная подготовка
+ 05C3  E8 FB5C			MainLoop:  call  ReadButtons                ; Считывание клавиш
+ 05C6  E8 FB8C			           call  ErrorCheck                 ; Проверка на ошибку ввода
+ 05C9  E8 FBAD			           call  StartControl               ; Обработка кнопки старт
+ 05CC  E8 FC1A			           call  ModeControl                ; Обработка кнопки режим
+ 05CF  E8 FC3E			           call  ResultsControl             ; Обработка кнопок просмотра результатов
+ 05D2  E8 FC96			           call  InitRandom                 ; Начальная генерация случайного числа и времени
+ 05D5  E8 FCC9			           call  GenerateRand               ; Генерация случайного числа и времени
+ 05D8  E8 FD12			           call  ReadNumbers                ; Обработка клавиш с номером
+ 05DB  E8 FD56			           call  ReactTest                  ; Расчет времени реакции
+ 05DE  E8 FD9C			           call  WriteCurRes                ; Сохранение текущего результата
+ 05E1  E8 FDC5			           call  CopySortMass               ; Копирование и сортировка массива
+ 05E4  E8 FE3E			           call  DispMode                   ; Вывод режима на индикаторы
+ 05E7  E8 FE41			           call  DispMassResults            ; Вывод результата на дисплей
+ 05EA  E8 FEE7			           call  DispReactTest              ; Вывод испытания на дисплей
+ 05ED  EB D4			           jmp   MainLoop       
+
+				           org   RomSize-16-((InitDataEnd-InitDataStart+15) AND 0FFF0h)
+				           ASSUME cs:NOTHING
+ 0FF0  EA ---- 05B0 R		           jmp   Far Ptr Start
+ 0FF5				Code       ENDS
+				END		Start
+Microsoft (R) Macro Assembler Version 6.14.8444		    06/08/23 02:12:57
+KursMPS_Solenov.asm					     Symbols 2 - 1
+
+
+
+
+Segments and Groups:
+
+                N a m e                 Size     Length   Align   Combine Class
+
+Code . . . . . . . . . . . . . .	16 Bit	 0FF5	  Para	  Private 
+Data . . . . . . . . . . . . . .	16 Bit	 016D	  Abs	  Private 
+InitData . . . . . . . . . . . .	16 Bit	 0000	  Para	  Private 
+IntTable . . . . . . . . . . . .	16 Bit	 0000	  Abs	  Private 
+Stk  . . . . . . . . . . . . . .	16 Bit	 0020	  Abs	  Private 
+
+
+Procedures,  parameters and locals:
+
+                N a m e                 Type     Value    Attr
+
+CopySortMass . . . . . . . . . .	P Near	 03A9	  Code	Length= 007C Public
+  CopySort1  . . . . . . . . . .	L Near	 03BF	  Code	
+  Sorting  . . . . . . . . . . .	L Near	 03DB	  Code	
+  Change . . . . . . . . . . . .	L Near	 03E0	  Code	
+  NoChange . . . . . . . . . . .	L Near	 041C	  Code	
+  CopySortEnd  . . . . . . . . .	L Near	 0424	  Code	
+DelayMS  . . . . . . . . . . . .	P Near	 024F	  Code	Length= 001C Public
+  DelayMSEndM  . . . . . . . . .	L Near	 026A	  Code	
+DelaySec . . . . . . . . . . . .	P Near	 04B0	  Code	Length= 0024 Public
+  DelayEndM  . . . . . . . . . .	L Near	 04D3	  Code	
+DispMassResults  . . . . . . . .	P Near	 042B	  Code	Length= 0085 Public
+  SortedMass . . . . . . . . . .	L Near	 0457	  Code	
+  DNOR1  . . . . . . . . . . . .	L Near	 045C	  Code	
+  DNOR2  . . . . . . . . . . . .	L Near	 0472	  Code	
+  DNOR3  . . . . . . . . . . . .	L Near	 0475	  Code	
+  Error1 . . . . . . . . . . . .	L Near	 048E	  Code	
+  NextDig  . . . . . . . . . . .	L Near	 04A6	  Code	
+  DNOREnd  . . . . . . . . . . .	L Near	 04AF	  Code	
+DispMode . . . . . . . . . . . .	P Near	 0425	  Code	Length= 0006 Public
+DispReactTest  . . . . . . . . .	P Near	 04D4	  Code	Length= 00DC Public
+  DRT1 . . . . . . . . . . . . .	L Near	 0518	  Code	
+  NumReactM1 . . . . . . . . . .	L Near	 052A	  Code	
+  DRT2 . . . . . . . . . . . . .	L Near	 053C	  Code	
+  ReadyIm  . . . . . . . . . . .	L Near	 0541	  Code	
+  NumReactM  . . . . . . . . . .	L Near	 0546	  Code	
+  ReadyIm2 . . . . . . . . . . .	L Near	 054B	  Code	
+  NextDig1 . . . . . . . . . . .	L Near	 0555	  Code	
+  DispRandDig  . . . . . . . . .	L Near	 0564	  Code	
+  DRT4 . . . . . . . . . . . . .	L Near	 0573	  Code	
+  RandomNum1 . . . . . . . . . .	L Near	 057E	  Code	
+  DRT5 . . . . . . . . . . . . .	L Near	 0588	  Code	
+  DRT6 . . . . . . . . . . . . .	L Near	 0595	  Code	
+  DRT7 . . . . . . . . . . . . .	L Near	 0598	  Code	
+  DRTEnd . . . . . . . . . . . .	L Near	 05AF	  Code	
+DrebDelete1  . . . . . . . . . .	P Near	 00FE	  Code	Length= 0012 Public
+  DrebReset1 . . . . . . . . . .	L Near	 00FE	  Code	
+  DrebLoop1  . . . . . . . . . .	L Near	 0103	  Code	
+DrebDelete2  . . . . . . . . . .	P Near	 0110	  Code	Length= 0012 Public
+  DrebReset2 . . . . . . . . . .	L Near	 0110	  Code	
+  DrebLoop2  . . . . . . . . . .	L Near	 0115	  Code	
+ErrorCheck . . . . . . . . . . .	P Near	 0155	  Code	Length= 0024 Public
+  CheckLoop  . . . . . . . . . .	L Near	 0160	  Code	
+  ReadError  . . . . . . . . . .	L Near	 0168	  Code	
+  NextBit  . . . . . . . . . . .	L Near	 016A	  Code	
+  ErrorCheckEnd  . . . . . . . .	L Near	 0178	  Code	
+GenerateRand . . . . . . . . . .	P Near	 02A1	  Code	Length= 004C Public
+  GenRand1 . . . . . . . . . . .	L Near	 02C8	  Code	
+  GenRand2 . . . . . . . . . . .	L Near	 02DC	  Code	
+  GenRand3 . . . . . . . . . . .	L Near	 02E4	  Code	
+  GenRandEnd . . . . . . . . . .	L Near	 02EC	  Code	
+InitRandom . . . . . . . . . . .	P Near	 026B	  Code	Length= 0036 Public
+  EndInitRandom  . . . . . . . .	L Near	 02A0	  Code	
+Init . . . . . . . . . . . . . .	P Near	 0013	  Code	Length= 00EB Public
+  Init1  . . . . . . . . . . . .	L Near	 001E	  Code	
+  Init2  . . . . . . . . . . . .	L Near	 0033	  Code	
+  Init3  . . . . . . . . . . . .	L Near	 0042	  Code	
+  Init4  . . . . . . . . . . . .	L Near	 0052	  Code	
+  Init5  . . . . . . . . . . . .	L Near	 0066	  Code	
+  Init6  . . . . . . . . . . . .	L Near	 007A	  Code	
+ModeControl  . . . . . . . . . .	P Near	 01E9	  Code	Length= 0027 Public
+  ModeControlEnd . . . . . . . .	L Near	 020F	  Code	
+ReactTest  . . . . . . . . . . .	P Near	 0334	  Code	Length= 0049 Public
+  ReactTestInc . . . . . . . . .	L Near	 0359	  Code	
+  ReactTestEnd . . . . . . . . .	L Near	 037C	  Code	
+ReadButtons  . . . . . . . . . .	P Near	 0122	  Code	Length= 0033 Public
+  ReadButtonsEnd . . . . . . . .	L Near	 0154	  Code	
+ReadNumbers  . . . . . . . . . .	P Near	 02ED	  Code	Length= 0047 Public
+  ReadNum  . . . . . . . . . . .	L Near	 0312	  Code	
+  ReadNumEnd . . . . . . . . . .	L Near	 031E	  Code	
+  ReadNumbersEnd . . . . . . . .	L Near	 0333	  Code	
+ResultsControl . . . . . . . . .	P Near	 0210	  Code	Length= 003F Public
+  RC1  . . . . . . . . . . . . .	L Near	 022E	  Code	
+  DownButton . . . . . . . . . .	L Near	 0231	  Code	
+  RC2  . . . . . . . . . . . . .	L Near	 024B	  Code	
+  ResultsControlEnd  . . . . . .	L Near	 024E	  Code	
+StartControl . . . . . . . . . .	P Near	 0179	  Code	Length= 0070 Public
+  SC1  . . . . . . . . . . . . .	L Near	 0188	  Code	
+  SC2  . . . . . . . . . . . . .	L Near	 018F	  Code	
+  SC3  . . . . . . . . . . . . .	L Near	 01AE	  Code	
+  SC4  . . . . . . . . . . . . .	L Near	 01BA	  Code	
+  StartControlEnd  . . . . . . .	L Near	 01E8	  Code	
+WriteCurRes  . . . . . . . . . .	P Near	 037D	  Code	Length= 002C Public
+  WCREnd . . . . . . . . . . . .	L Near	 03A8	  Code	
+
+
+Symbols:
+
+                N a m e                 Type     Value    Attr
+
+ButtonsCheck . . . . . . . . . .	Word	 0156	  Data	
+Buttons  . . . . . . . . . . . .	Word	 0154	  Data	
+DelayEndFl . . . . . . . . . . .	Byte	 0161	  Data	
+DelayMSEndFl . . . . . . . . . .	Byte	 0162	  Data	
+DigDS  . . . . . . . . . . . . .	Byte	 0000	  Data	
+DigOutPort . . . . . . . . . . .	Number	 00FEh	 
+ErrorFlag  . . . . . . . . . . .	Byte	 016C	  Data	
+ErrorImageDS . . . . . . . . . .	Byte	 001D	  Data	
+ErrorImage . . . . . . . . . . .	Byte	 0003	  Code	
+InButtonPort1  . . . . . . . . .	Number	 00FEh	 
+InButtonPort2  . . . . . . . . .	Number	 00FDh	 
+InPort1Old . . . . . . . . . . .	Byte	 015A	  Data	
+InPort2Old . . . . . . . . . . .	Byte	 015B	  Data	
+IndSlctPort  . . . . . . . . . .	Number	 00FDh	 
+InitDataEnd  . . . . . . . . . .	L Near	 0000	  InitData	
+InitDataStart  . . . . . . . . .	L Near	 0000	  InitData	
+InputNum . . . . . . . . . . . .	Byte	 0158	  Data	
+IsEndFl  . . . . . . . . . . . .	Byte	 015E	  Data	
+IsIncNumReact  . . . . . . . . .	Byte	 015F	  Data	
+IsInitStart  . . . . . . . . . .	Byte	 016B	  Data	
+IsRandomTime . . . . . . . . . .	Byte	 0166	  Data	
+IsSortMass . . . . . . . . . . .	Byte	 0168	  Data	
+IsStartFl  . . . . . . . . . . .	Byte	 015D	  Data	
+IsStartTest  . . . . . . . . . .	Byte	 0167	  Data	
+MainLoop . . . . . . . . . . . .	L Near	 05C3	  Code	
+ModeSlctPort . . . . . . . . . .	Number	 00FBh	 
+NextByteFl . . . . . . . . . . .	Byte	 015C	  Data	
+NumOfMode  . . . . . . . . . . .	Byte	 0159	  Data	
+NumOfReact3  . . . . . . . . . .	Word	 0150	  Data	
+NumOfReact . . . . . . . . . . .	Byte	 014F	  Data	
+NumOfRes . . . . . . . . . . . .	Word	 0152	  Data	
+RandGenFl  . . . . . . . . . . .	Byte	 0160	  Data	
+RandomNum  . . . . . . . . . . .	Word	 0018	  Data	
+ReactTimeOld . . . . . . . . . .	Word	 0016	  Data	
+ReactTime  . . . . . . . . . . .	Word	 0014	  Data	
+ReadyImageDS . . . . . . . . . .	Byte	 001A	  Data	
+ReadyImage . . . . . . . . . . .	Byte	 0000	  Code	
+ResMassDS  . . . . . . . . . . .	Byte	 0023	  Data	
+ResMassSortDS  . . . . . . . . .	Byte	 00B9	  Data	
+RomSize  . . . . . . . . . . . .	Number	 1000h	 
+SizeOfElemResMass  . . . . . . .	Number	 0003h	 
+SortVar  . . . . . . . . . . . .	Word	 0169	  Data	
+StartImageDS . . . . . . . . . .	Byte	 0020	  Data	
+StartImage . . . . . . . . . . .	Byte	 0006	  Code	
+Start  . . . . . . . . . . . . .	L Near	 05B0	  Code	
+StkTop . . . . . . . . . . . . .	Word	 0020	  Stk	
+TablDS . . . . . . . . . . . . .	Byte	 000A	  Data	
+Tabl . . . . . . . . . . . . . .	Byte	 0009	  Code	
+TimeMSDS . . . . . . . . . . . .	Byte	 0165	  Data	
+TimeMS . . . . . . . . . . . . .	Number	 0006h	 
+TimeStartDS  . . . . . . . . . .	Word	 0163	  Data	
+TimeStart  . . . . . . . . . . .	Number	 0200h	 
+
+	   0 Warnings
+	   0 Errors
