@@ -270,7 +270,10 @@ ModeControl   PROC  NEAR
            cmp   Buttons, 2000h             ; Проверка на бит клавиши Режим
            jnz   ModeControlEnd
            shl   NumOfMode, 1               ; Сдвиг влево
-           cmp   NumOfMode, 4               
+           cmp   NumOfMode, 4
+           jnz   MC1
+           mov   NumOfRes, 0
+MC1:       cmp   NumOfMode, 4               
            jbe   ModeControlEnd
            mov   NumOfMode, 1               ; Если сдвиг был 3 раза, то сброс на значение 1
 ModeControlEnd:
@@ -297,6 +300,8 @@ DownButton:
            cmp   ax, NumOfReact3            ; не будет равно или больше количества испытаний
            jb    RC2
            mov   ax, NumOfReact3; 297       ; Иначе присвоение адреса последнего элемента
+           cmp   NumOfReact, 0
+           jz    RC2
            sub   ax, 3                      ; Перемещение на начало последнего элемента
 RC2:       mov   NumOfRes, ax
 ResultsControlEnd:  
